@@ -1,0 +1,194 @@
+---
+title: "LA-uses analysis"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+load("~/hmi_1_23_19")
+library(ltm)
+#library(GPArotation)
+library(tidyr)
+library(gvlma)
+library("HLMdiag")
+library("DHARMa")
+library("car") #for the Levene test which we will not discuss here
+library("Matrix")
+library(mitools)
+library(stargazer)
+library(lme4)
+library(nlme)
+library(mice)
+library(mitml)
+library(multcomp)
+library(foreach)
+library(ggplot2)
+library(stringr)
+library(dplyr)  #I load dplyr last because some of its functions (select) will be masked by plyr and it is a PITA to debug
+library(kableExtra)
+plot_col <- c('#66c2a5', '#fc8d62', '#8da0cb')
+#cbbpalette <- c('#000000','#E69F00','#56B4E9')
+cbbpalette <- c( "#009E73", "#e79f00", "#9ad0f3", "#0072B2", "#D55E00", 
+    "#CC79A7","#000000", "#F0E442") #colorblind and grayscale friendly.
+```
+
+Creating mitml and extra variables
+```{r}
+#df_full <- complete(hmi.fall.2018)
+#str(df_full)
+MIdata<-mids2mitml.list(hmi_1_23_19) #converts file type
+thing <- list()
+for (i in 1:10){
+  temp <- MIdata[[i]]
+  class_means <- temp %>% group_by(course_id) %>% summarise(pre_mean_class = mean(pre_score))
+  class_means$class_pre_cent <- class_means$pre_mean_class - mean(class_means$pre_mean_class)
+  temp <- left_join(temp,class_means, by="course_id")
+  temp$stud_pre_cent <- temp$pre_score - temp$pre_mean_class
+  temp$gain <- temp$post_score - temp$pre_score
+  temp$coll <- ifelse(temp$lecture %in% 1,0,1)
+  temp$retake <- ifelse (temp$first_time==1,1,0)
+  temp$race_other_no_int[temp$amind_no_int %in% 1] <- 1 # combines the american indian students in to the other group there were 61 if these students
+  thing[[i]] <- temp
+  }
+MIdata <- as.mitml.list(thing)
+  
+```
+
+#Descriptive statistics by lecture
+```{r}
+#variables: M, group by
+
+desc2 <- foreach(i=1:10, .combine=rbind) %do% {
+temp <- MIdata[[i]]
+temp$race <- ifelse(temp$black_no_int ==1, "Black",ifelse(temp$hispanic_no_int ==1, "Hispanic",ifelse(temp$asian_no_int ==1, "Asian",ifelse(temp$pacisland_no_int ==1, "Island",ifelse(temp$race_other_no_int ==1, "Other","White")))))
+desc <- temp  %>% summarise(N = length(pre_score),
+                                                                 pre_mean = mean(pre_score),
+                                                                 pre_sd = sd(pre_score),
+                                                                 post_mean = mean(post_score),
+                                                                 post_sd = sd(post_score),
+                                                                 gain_mean = mean (post_score-pre_score),
+                                                                 gain_sd = sd(post_score-pre_score)
+                                                                 )
+
+
+return <- desc
+}
+desc <- desc2 %>% summarise_all(funs(mean))
+#desc$lecture <- ifelse(desc$lecture ==1, "Lecture","Collaborative")
+#desc$gend_URM <- ifelse(desc$gend_URM==1, "Female","Male")
+kable(desc, digits=1)
+```
+
+Models
+```{r}
+
+mod_1<-with(MIdata,{lmer(
+                  gain~1 + (1|course_id)
+                  )})
+aic.1 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+
+
+mod_2<-with(MIdata,{lmer(gain~1 + class_pre_cent + (1|course_id))})
+aic.2 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + class_pre_cent + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+
+mod_3<-with(MIdata,{lmer(gain~1 + stud_pre_cent + (1|course_id))})
+aic.3 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + stud_pre_cent + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+
+mod_4<-with(MIdata,{lmer(gain~1 + stud_pre_cent + retake + (1|course_id))})
+aic.4 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + stud_pre_cent + retake + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+
+mod_5<-with(MIdata,{lmer(gain~1 + stud_pre_cent + retake + FMCE + (1|course_id))})
+aic.5 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + stud_pre_cent + retake + FMCE + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+
+mod_6<-with(MIdata,{lmer(gain~1 + stud_pre_cent + retake + coll + (1|course_id))})
+aic.6 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + stud_pre_cent + retake + coll + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+
+mod_7<-with(MIdata,{lmer(gain~1 + stud_pre_cent + retake + colab_no_la + used_las + (1|course_id))})
+aic.7 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + stud_pre_cent + retake + colab_no_la + used_las + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+
+mod_8<-with(MIdata,{lmer(gain~1 + stud_pre_cent + retake + colab_no_la + la_in_lab + la_in_lecture + la_in_rec + (1|course_id))})
+aic.8 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + stud_pre_cent + retake + colab_no_la + la_in_lab + la_in_lecture + la_in_rec + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+
+mod_9<-with(MIdata,{lmer(gain~1 + stud_pre_cent + retake + colab_no_la + la_in_lab + la_in_lecture + la_in_rec + lecture + (1|course_id))})
+aic.9 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + stud_pre_cent + retake + colab_no_la + la_in_lab + la_in_lecture + la_in_rec + lecture + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+
+mod_10<-with(MIdata,{lmer(gain~1 + stud_pre_cent + retake + colab_no_la*lecture + la_in_lab + la_in_lecture + la_in_rec + + (1|course_id))})
+aic.10 <- foreach(i=1:10, .combine=rbind) %do% {
+  mod_aic <- lmer(data=MIdata[[i]], 
+                  gain~1 + stud_pre_cent + retake + colab_no_la*lecture + la_in_lab + la_in_lecture + la_in_rec + + (1|course_id)
+)
+  return <- AIC(mod_aic)
+}
+```
+
+Examine AIC
+```{r}
+info_crit <- as.data.frame(cbind(aic.1,aic.2,aic.3,aic.4,aic.5,aic.6,aic.7, aic.8, aic.9, aic.10))
+#info_crit[11,] <- colMeans(info_crit)
+
+colnames(info_crit) <- c("aic.1", "aic.2","aic.3","aic.4","aic.5","aic.6","aic.7", "aic.8","aic.9","aic.10")
+
+ics <- as.data.frame(colMeans(info_crit))
+ics$delta <- ics$`colMeans(info_crit)`- min(ics$`colMeans(info_crit)`)
+
+barplot(ics$delta)
+
+```
+
+```{r}
+testEstimates(mod_1, var.comp=TRUE)
+testEstimates(mod_2, var.comp=TRUE)
+testEstimates(mod_3, var.comp=TRUE)
+testEstimates(mod_4, var.comp=TRUE)
+testEstimates(mod_5, var.comp=TRUE)
+testEstimates(mod_6, var.comp=TRUE)
+testEstimates(mod_7, var.comp=TRUE)
+testEstimates(mod_8, var.comp=TRUE)
+testEstimates(mod_9, var.comp=TRUE)
+testEstimates(mod_10, var.comp=TRUE)
+```
+testEstimates(mod_8, var.comp=TRUE)
